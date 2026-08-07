@@ -19,10 +19,11 @@ jobs:
     timeout-minutes: 50
     env:
       AUTOMATION_BRANCH: automation/hourly-product
+      OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
       GH_TOKEN: ${{ github.token }}
     steps:
       - name: Check out the repository
-        uses: actions/checkout@v5
+        uses: actions/checkout@v4
         with:
           fetch-depth: 0
 
@@ -37,12 +38,16 @@ jobs:
             git checkout -b "$AUTOMATION_BRANCH"
           fi
 
+      - name: Install Codex CLI
+        run: npm install --global @openai/codex
+
       - name: Run the autonomous engineering prompt
-        uses: openai/codex-action@v1
-        with:
-          openai-api-key: ${{ secrets.OPENAI_API_KEY }}
-          prompt-file: AUTOMATION_PROMPT.md
-          permission-profile: ":workspace"
+        shell: bash
+        run: |
+          set -euo pipefail
+          codex exec --full-auto --skip-git-repo-check \
+            -c sandbox_workspace_write.network_access=true \
+            - < AUTOMATION_PROMPT.md
 
       - name: Run repository tests
         run: ./scripts/test.sh

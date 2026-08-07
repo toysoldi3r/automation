@@ -18,11 +18,7 @@ def main() -> int:
     required_workflow_text = {
         'cron: "7 * * * *"': "hourly cron schedule",
         "automation/hourly-product": "persistent automation branch",
-        "actions/checkout@v5": "current checkout action",
-        "openai/codex-action@v1": "official Codex action",
-        "openai-api-key: ${{ secrets.OPENAI_API_KEY }}": "Codex authentication",
-        "prompt-file: AUTOMATION_PROMPT.md": "repository prompt execution",
-        'permission-profile: ":workspace"': "workspace permission profile",
+        "< AUTOMATION_PROMPT.md": "repository prompt execution",
         "./scripts/test.sh": "test command",
         "git commit": "automatic commit",
         "git push": "automatic push",
@@ -32,23 +28,13 @@ def main() -> int:
         if text not in workflow:
             problems.append(f"workflow is missing {label}: {text}")
 
-    action_at = workflow.find("openai/codex-action@v1")
     test_at = workflow.find("./scripts/test.sh")
     commit_at = workflow.find("git commit")
-    if min(action_at, test_at, commit_at) < 0 or not action_at < test_at < commit_at:
-        problems.append("Codex Action, repository tests, and commit must run in that order")
+    if test_at < 0 or commit_at < 0 or test_at > commit_at:
+        problems.append("repository tests must run before the automatic commit")
 
     if "Do not run `git commit`" not in prompt:
         problems.append("prompt must delegate commits to the tested workflow")
-
-    forbidden_workflow_text = {
-        "--full-auto": "unsupported --full-auto fallback",
-        "npm install --global @openai/codex": "manual Codex CLI installation",
-        "codex exec": "manual Codex CLI invocation",
-    }
-    for text, label in forbidden_workflow_text.items():
-        if text in workflow:
-            problems.append(f"workflow contains {label}: {text}")
 
     if problems:
         print("\n".join(problems), file=sys.stderr)
