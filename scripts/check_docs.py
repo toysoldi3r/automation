@@ -7,13 +7,7 @@ import sys
 
 
 ROOT = Path(__file__).resolve().parent.parent
-REQUIRED = (
-    "ROADMAP.md",
-    "BACKLOG.md",
-    "RESEARCH.md",
-    "DECISIONS.md",
-    "AUTOMATION_PROMPT.md",
-)
+REQUIRED = ("ROADMAP.md", "BACKLOG.md", "RESEARCH.md", "DECISIONS.md")
 LINK = re.compile(r"\[[^]]+\]\(([^)]+)\)")
 
 

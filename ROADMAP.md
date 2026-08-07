@@ -6,9 +6,6 @@ Do not build the service until the validation gate below is met. The product
 hypothesis is a GitHub App that discovers scheduled GitHub Actions, detects late
 or missing runs without requiring workflow edits, and alerts the owning team.
 
-Hourly autonomous iterations now run through a persistent review branch. They may
-advance research and repository tooling, but must not bypass the validation gate.
-
 ### Gate 1 — validate the problem (next)
 
 - Interview at least 10 maintainers or platform engineers who operate scheduled

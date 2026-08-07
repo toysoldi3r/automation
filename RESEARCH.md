@@ -2,10 +2,6 @@
 
 Last updated: 2026-08-07
 
-Automation infrastructure added on this date does not change the evidence level
-or validate the leading hypothesis. It makes future hourly research and product
-iterations reproducible on a single review branch.
-
 ## Evidence standard and current limitation
 
 This first run established a candidate comparison, not demand validation. An

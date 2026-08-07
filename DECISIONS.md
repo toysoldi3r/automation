@@ -24,24 +24,3 @@ failure notifications are adequate, teams will not grant the minimum GitHub App
 permissions, three qualified pilot teams cannot be found, or no buyer commits to
 the proposed price after a successful pilot. Re-rank candidates if verified
 evidence materially changes the preliminary scores.
-
-## 2026-08-07 — use a tested persistent branch for hourly automation
-
-**Status:** accepted.
-
-**Decision:** A scheduled GitHub Actions job executes the versioned
-`AUTOMATION_PROMPT.md`, runs the repository-owned test entry point, and commits
-only after it passes. All runs reuse `automation/hourly-product`; the job looks for
-an open pull request before creating one, so routine runs update the same review
-surface.
-
-**Rationale:** Keeping the prompt and tests in version control makes behavior
-reviewable. Separating agent edits from workflow-owned commit/push operations
-enforces the test-before-commit ordering. Concurrency and a timeout prevent hourly
-runs from racing on the shared branch.
-
-**Trade-offs:** Installing the current official Codex npm package at run time is
-less reproducible than pinning a version, but avoids silently freezing the agent
-on an obsolete release. Changes remain review-gated and never self-merge. Revisit
-this choice if upstream release drift causes failures; pin a verified version and
-schedule dependency updates instead.
