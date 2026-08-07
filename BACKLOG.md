@@ -20,9 +20,6 @@ Items are ordered. Product implementation is blocked by the validation gate in
    Healthchecks.io, Better Stack, Cronitor, Sentry Crons, and general workflow
    observability products.
 
-The hourly workflow should take one item or a smaller evidence-producing step per
-run, then update this ordering rather than repeatedly creating planning documents.
-
 ## Next — only after Gate 1 passes
 
 - Write the smallest end-to-end technical design.

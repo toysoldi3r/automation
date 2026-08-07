@@ -23,7 +23,7 @@ jobs:
       GH_TOKEN: ${{ github.token }}
     steps:
       - name: Check out the repository
-        uses: actions/checkout@v5
+        uses: actions/checkout@v4
         with:
           fetch-depth: 0
 
@@ -39,30 +39,15 @@ jobs:
           fi
 
       - name: Install Codex CLI
-        shell: bash
-        run: |
-          set -euo pipefail
-          npm install --global @openai/codex
-          codex --version
-          codex exec --help >/dev/null
-
-      - name: Verify Codex credentials
-        shell: bash
-        run: |
-          if [ -z "${OPENAI_API_KEY:-}" ]; then
-            echo "::error::OPENAI_API_KEY is not configured. Add it under Settings > Secrets and variables > Actions."
-            exit 1
-          fi
+        run: npm install --global @openai/codex
 
       - name: Run the autonomous engineering prompt
         shell: bash
         run: |
           set -euo pipefail
-          codex \
-            -c 'approval_policy="never"' \
-            -c 'sandbox_mode="workspace-write"' \
-            -c 'sandbox_workspace_write.network_access=true' \
-            exec --skip-git-repo-check - < AUTOMATION_PROMPT.md
+          codex exec --full-auto --skip-git-repo-check \
+            -c sandbox_workspace_write.network_access=true \
+            - < AUTOMATION_PROMPT.md
 
       - name: Run repository tests
         run: ./scripts/test.sh
