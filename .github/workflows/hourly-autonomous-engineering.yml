@@ -1,0 +1,84 @@
+name: Hourly autonomous engineering
+
+on:
+  schedule:
+    - cron: "7 * * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  pull-requests: write
+
+concurrency:
+  group: hourly-autonomous-engineering
+  cancel-in-progress: false
+
+jobs:
+  engineer:
+    runs-on: ubuntu-latest
+    timeout-minutes: 50
+    env:
+      AUTOMATION_BRANCH: automation/hourly-product
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - name: Check out the repository
+        uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+
+      - name: Continue the persistent automation branch
+        shell: bash
+        run: |
+          set -euo pipefail
+          git fetch origin "$AUTOMATION_BRANCH" || true
+          if git show-ref --verify --quiet "refs/remotes/origin/$AUTOMATION_BRANCH"; then
+            git checkout -B "$AUTOMATION_BRANCH" "origin/$AUTOMATION_BRANCH"
+          else
+            git checkout -b "$AUTOMATION_BRANCH"
+          fi
+
+      - name: Run the autonomous engineering prompt
+        uses: openai/codex-action@v1
+        with:
+          openai-api-key: ${{ secrets.OPENAI_API_KEY }}
+          prompt-file: AUTOMATION_PROMPT.md
+          permission-profile: ":workspace"
+
+      - name: Run repository tests
+        run: ./scripts/test.sh
+
+      - name: Commit and push successful changes
+        id: changes
+        shell: bash
+        run: |
+          set -euo pipefail
+          if git diff --quiet && git diff --cached --quiet && [ -z "$(git ls-files --others --exclude-standard)" ]; then
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          git config user.name "hourly-product-bot"
+          git config user.email "hourly-product-bot@users.noreply.github.com"
+          git add --all
+          git diff --cached --check
+          git commit -m "automation: hourly product iteration"
+          git push --set-upstream origin "$AUTOMATION_BRANCH"
+          echo "changed=true" >> "$GITHUB_OUTPUT"
+
+      - name: Create the pull request if it does not exist
+        if: steps.changes.outputs.changed == 'true'
+        shell: bash
+        env:
+          BASE_BRANCH: ${{ github.event.repository.default_branch }}
+        run: |
+          set -euo pipefail
+          existing_pr="$(gh pr list --state open --head "$AUTOMATION_BRANCH" --base "$BASE_BRANCH" --json number --jq '.[0].number // empty')"
+          if [ -z "$existing_pr" ]; then
+            gh pr create \
+              --base "$BASE_BRANCH" \
+              --head "$AUTOMATION_BRANCH" \
+              --title "Hourly autonomous product development" \
+              --body-file .github/AUTOMATION_PR_BODY.md
+          else
+            echo "Updated existing pull request #$existing_pr"
+          fi
