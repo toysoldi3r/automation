@@ -1,8 +1,10 @@
 name: Hourly autonomous engineering
+run-name: Hourly autonomous engineering (${{ github.ref_name }} @ ${{ github.sha }})
 
 on:
   schedule:
-    - cron: "7 * * * *"
+    # Avoid the start of the hour, when scheduled Actions are most likely to queue.
+    - cron: "17 * * * *"
   workflow_dispatch:
 
 permissions:
@@ -19,64 +21,116 @@ jobs:
     timeout-minutes: 50
     env:
       AUTOMATION_BRANCH: automation/hourly-product
-      OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
-      GH_TOKEN: ${{ github.token }}
+      BASE_BRANCH: ${{ github.event.repository.default_branch }}
     steps:
-      - name: Check out the repository
-        uses: actions/checkout@v4
+      - name: Identify the deployed workflow revision
+        shell: bash
+        run: |
+          {
+            echo "### Hourly runner revision"
+            echo "- Branch: \`${GITHUB_REF_NAME}\`"
+            echo "- Commit: \`${GITHUB_SHA}\`"
+            echo "- Workflow: \`${GITHUB_WORKFLOW_REF}\`"
+          } >> "$GITHUB_STEP_SUMMARY"
+          echo "::notice title=Workflow revision::$GITHUB_WORKFLOW_REF at $GITHUB_SHA"
+
+      - name: Check out the default branch without stored credentials
+        uses: actions/checkout@v5
         with:
           fetch-depth: 0
+          persist-credentials: false
 
-      - name: Continue the persistent automation branch
+      - name: Validate required configuration
+        id: preflight
         shell: bash
+        env:
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
         run: |
           set -euo pipefail
-          git fetch origin "$AUTOMATION_BRANCH" || true
-          if git show-ref --verify --quiet "refs/remotes/origin/$AUTOMATION_BRANCH"; then
-            git checkout -B "$AUTOMATION_BRANCH" "origin/$AUTOMATION_BRANCH"
-          else
-            git checkout -b "$AUTOMATION_BRANCH"
+          if [ -z "${OPENAI_API_KEY:-}" ]; then
+            echo "::error::Missing OPENAI_API_KEY repository secret. See README.md#enable-the-hourly-runner."
+            exit 1
           fi
 
-      - name: Install Codex CLI
-        run: npm install --global @openai/codex
-
-      - name: Run the autonomous engineering prompt
+      - name: Continue the persistent automation branch
+        id: branch
         shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
-          codex exec --full-auto --skip-git-repo-check \
-            -c sandbox_workspace_write.network_access=true \
-            - < AUTOMATION_PROMPT.md
+          auth_header="$(printf 'x-access-token:%s' "$GH_TOKEN" | base64 -w0)"
+          git -c "http.https://github.com/.extraheader=AUTHORIZATION: basic $auth_header" \
+            fetch origin "+refs/heads/$BASE_BRANCH:refs/remotes/origin/$BASE_BRANCH"
+          git -c "http.https://github.com/.extraheader=AUTHORIZATION: basic $auth_header" \
+            fetch origin "+refs/heads/$AUTOMATION_BRANCH:refs/remotes/origin/$AUTOMATION_BRANCH" || true
+
+          if git show-ref --verify --quiet "refs/remotes/origin/$AUTOMATION_BRANCH"; then
+            git checkout -B "$AUTOMATION_BRANCH" "origin/$AUTOMATION_BRANCH"
+            if git merge-base --is-ancestor "origin/$AUTOMATION_BRANCH" "origin/$BASE_BRANCH"; then
+              # The previous automation PR was merged; begin the next cycle cleanly.
+              git reset --hard "origin/$BASE_BRANCH"
+            else
+              # Include human changes made since the previous autonomous run.
+              git -c user.name=hourly-product-bot \
+                -c user.email=hourly-product-bot@users.noreply.github.com \
+                merge --no-edit "origin/$BASE_BRANCH"
+            fi
+          else
+            git checkout -b "$AUTOMATION_BRANCH" "origin/$BASE_BRANCH"
+          fi
+
+      - name: Run the autonomous engineering prompt
+        id: codex
+        uses: openai/codex-action@v1
+        with:
+          openai-api-key: ${{ secrets.OPENAI_API_KEY }}
+          prompt-file: AUTOMATION_PROMPT.md
+          permission-profile: ":workspace"
 
       - name: Run repository tests
+        id: tests
         run: ./scripts/test.sh
 
       - name: Commit and push successful changes
-        id: changes
+        id: publish
         shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
-          if git diff --quiet && git diff --cached --quiet && [ -z "$(git ls-files --others --exclude-standard)" ]; then
-            echo "changed=false" >> "$GITHUB_OUTPUT"
+          git config user.name "hourly-product-bot"
+          git config user.email "hourly-product-bot@users.noreply.github.com"
+
+          if ! git diff --quiet || ! git diff --cached --quiet || \
+             [ -n "$(git ls-files --others --exclude-standard)" ]; then
+            git add --all
+            git diff --cached --check
+            git commit -m "automation: hourly product iteration"
+          fi
+
+          if git show-ref --verify --quiet "refs/remotes/origin/$AUTOMATION_BRANCH" && \
+             [ "$(git rev-parse HEAD)" = "$(git rev-parse "origin/$AUTOMATION_BRANCH")" ]; then
+            echo "pushed=false" >> "$GITHUB_OUTPUT"
+          else
+            auth_header="$(printf 'x-access-token:%s' "$GH_TOKEN" | base64 -w0)"
+            git -c "http.https://github.com/.extraheader=AUTHORIZATION: basic $auth_header" \
+              push --set-upstream origin "$AUTOMATION_BRANCH"
+            echo "pushed=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Create or recover the pull request
+        id: pull_request
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          if [ "$(git rev-list --count "origin/$BASE_BRANCH..HEAD")" -eq 0 ]; then
+            echo "Automation branch has no commits to propose."
             exit 0
           fi
 
-          git config user.name "hourly-product-bot"
-          git config user.email "hourly-product-bot@users.noreply.github.com"
-          git add --all
-          git diff --cached --check
-          git commit -m "automation: hourly product iteration"
-          git push --set-upstream origin "$AUTOMATION_BRANCH"
-          echo "changed=true" >> "$GITHUB_OUTPUT"
-
-      - name: Create the pull request if it does not exist
-        if: steps.changes.outputs.changed == 'true'
-        shell: bash
-        env:
-          BASE_BRANCH: ${{ github.event.repository.default_branch }}
-        run: |
-          set -euo pipefail
           existing_pr="$(gh pr list --state open --head "$AUTOMATION_BRANCH" --base "$BASE_BRANCH" --json number --jq '.[0].number // empty')"
           if [ -z "$existing_pr" ]; then
             gh pr create \
@@ -87,3 +141,32 @@ jobs:
           else
             echo "Updated existing pull request #$existing_pr"
           fi
+
+      - name: Explain a failed run
+        if: ${{ failure() }}
+        shell: bash
+        env:
+          PREFLIGHT_OUTCOME: ${{ steps.preflight.outcome }}
+          BRANCH_OUTCOME: ${{ steps.branch.outcome }}
+          CODEX_OUTCOME: ${{ steps.codex.outcome }}
+          TESTS_OUTCOME: ${{ steps.tests.outcome }}
+          PUBLISH_OUTCOME: ${{ steps.publish.outcome }}
+          PR_OUTCOME: ${{ steps.pull_request.outcome }}
+        run: |
+          {
+            echo "## Failure diagnosis"
+            echo
+            echo "| Stage | Outcome |"
+            echo "| --- | --- |"
+            echo "| Secret preflight | $PREFLIGHT_OUTCOME |"
+            echo "| Branch preparation | $BRANCH_OUTCOME |"
+            echo "| Codex | $CODEX_OUTCOME |"
+            echo "| Repository tests | $TESTS_OUTCOME |"
+            echo "| Commit and push | $PUBLISH_OUTCOME |"
+            echo "| Pull request | $PR_OUTCOME |"
+            echo
+            echo "Run: $GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"
+            echo "Revision: $GITHUB_WORKFLOW_REF at $GITHUB_SHA"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+          echo "::error title=Hourly runner failed::Open the job summary for the failing stage and deployed revision."
