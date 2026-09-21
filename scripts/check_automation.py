@@ -16,13 +16,22 @@ def main() -> int:
     prompt = PROMPT.read_text(encoding="utf-8") if PROMPT.exists() else ""
 
     required_workflow_text = {
-        'cron: "7 * * * *"': "hourly cron schedule",
+        'cron: "17 * * * *"': "hourly cron schedule",
+        "run-name: Hourly autonomous engineering": "versioned run title",
+        "Identify the deployed workflow revision": "deployed revision diagnostic",
+        "Explain a failed run": "failure-stage diagnostic",
         "automation/hourly-product": "persistent automation branch",
-        "< AUTOMATION_PROMPT.md": "repository prompt execution",
+        "uses: actions/checkout@v5": "current checkout action",
+        "uses: openai/codex-action@v1": "official Codex action",
+        "prompt-file: AUTOMATION_PROMPT.md": "repository prompt execution",
+        "persist-credentials: false": "credential isolation from the agent",
+        "Validate required configuration": "configuration preflight",
         "./scripts/test.sh": "test command",
         "git commit": "automatic commit",
-        "git push": "automatic push",
+        "push --set-upstream origin": "automatic push",
         "gh pr list --state open": "existing pull-request lookup",
+        'git rev-list --count "origin/$BASE_BRANCH..HEAD"':
+            "pull-request recovery when a previous creation attempt failed",
     }
     for text, label in required_workflow_text.items():
         if text not in workflow:
@@ -35,6 +44,10 @@ def main() -> int:
 
     if "Do not run `git commit`" not in prompt:
         problems.append("prompt must delegate commits to the tested workflow")
+
+    job_env = workflow.split("steps:", 1)[0]
+    if "GH_TOKEN:" in job_env or "OPENAI_API_KEY:" in job_env:
+        problems.append("write credentials must not be exposed to every job step")
 
     if problems:
         print("\n".join(problems), file=sys.stderr)
